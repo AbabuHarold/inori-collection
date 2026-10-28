@@ -47,6 +47,26 @@ jobs:
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "アプリのフォルダー: $dir"
 
+      # ブラウザからのアップロードでファイルが足りないと、分かりにくいエラーになるため先に確認する
+      - name: Check the app files
+        working-directory: ${{ steps.app.outputs.dir }}
+        run: |
+          missing=0
+          for f in index.html package.json package-lock.json tsconfig.json vite.config.ts \
+                   src/main.tsx src/App.tsx src/data/releases.ts src/lib/backup.ts src/lib/offline.ts \
+                   src/components/Jacket.tsx public/favicon.svg public/icons/icon-192.png public/icons/icon-512.png \
+                   tests/data.test.ts tests/backup.test.ts tests/fixtures/backup-v1.0.0-34forms.zip; do
+            if [ ! -f "$f" ]; then
+              echo "::error::ファイルが見つかりません: ${{ steps.app.outputs.dir }}/$f"
+              missing=1
+            fi
+          done
+          if [ "$missing" = 1 ]; then
+            echo "::error::アプリのファイルが足りません。アプリ一式（src・tests・public フォルダーなどすべて）をアップロードしてください"
+            exit 1
+          fi
+          echo "アプリのファイル一式を確認しました（$(find src tests public -type f | wc -l) ファイル）"
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -75,6 +95,22 @@ jobs:
         run: |
           echo "公開パス: $BASE_PATH"
           npm run build
+
+      # 公開パスに合わせたビルドになっているかを確認する（合っていないと真っ白な画面になるため、その場合は公開しない）
+      - name: Check the build
+        working-directory: ${{ steps.app.outputs.dir }}
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+        run: |
+          if ! grep -q "src=\"${BASE_PATH}assets/" dist/index.html; then
+            echo "::error::ビルド結果が公開パス ${BASE_PATH} に合っていません。${{ steps.app.outputs.dir }} フォルダーのファイルが v1.1.1 以降か確認してください（vite.config.ts・package.json など）"
+            exit 1
+          fi
+          if ! grep -q "\"start_url\":\"${BASE_PATH}\"" dist/manifest.webmanifest; then
+            echo "::error::manifest.webmanifest の start_url が公開パス ${BASE_PATH} になっていません"
+            exit 1
+          fi
+          echo "公開パス ${BASE_PATH} に合ったビルドです（バージョン $(node -p "require('./package.json').version")）"
 
       - name: Upload the built app
         uses: actions/upload-pages-artifact@v5
