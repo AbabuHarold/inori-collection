@@ -1,0 +1,93 @@
+# Inori Collection を GitHub Pages に公開するワークフロー
+#
+# 使い方（最初に1回だけ）：
+#   リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にする
+#
+# main ブランチに push するたびに、テスト → ビルド → 公開 を自動で行います。
+# テストが1件でも失敗した場合は公開しません（公開中のアプリはそのまま残ります）。
+#
+# アプリのファイル（package.json）は、リポジトリの直下・inori-collection フォルダーの
+# どちらに置いても動きます（自動で判別します）。
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 公開処理は同時に1つだけ。実行中の公開は中断しない
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Locate the app folder
+        id: app
+        run: |
+          if [ -f package.json ]; then
+            dir=.
+          elif [ -f inori-collection/package.json ]; then
+            dir=inori-collection
+          else
+            echo "::error::package.json が見つかりません（リポジトリ直下か inori-collection フォルダーに置いてください）"
+            exit 1
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "アプリのフォルダー: $dir"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ steps.app.outputs.dir }}/package-lock.json
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Install dependencies
+        working-directory: ${{ steps.app.outputs.dir }}
+        run: npm ci
+
+      - name: Unit tests
+        working-directory: ${{ steps.app.outputs.dir }}
+        run: npm test
+
+      - name: Build
+        working-directory: ${{ steps.app.outputs.dir }}
+        env:
+          # 例：https://<ユーザー名>.github.io/inori-collection/ → /inori-collection/
+          #     独自ドメインで公開している場合 → /
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+        run: |
+          echo "公開パス: $BASE_PATH"
+          npm run build
+
+      - name: Upload the built app
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ steps.app.outputs.dir }}/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
