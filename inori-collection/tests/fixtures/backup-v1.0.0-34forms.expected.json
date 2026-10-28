@@ -1,0 +1,189 @@
+{
+  "createdBy": "Inori Collection v1.0.0 (commit e4f6707)",
+  "v1FormIds": [
+    "KICM-2174",
+    "KIXM-648",
+    "KICS-94217",
+    "KICS-4217",
+    "KICS-94219",
+    "KICS-4219",
+    "KIXM-618",
+    "KICS-94166",
+    "KICS-4166",
+    "KIXM-578",
+    "KICM-2138",
+    "KICM-2128",
+    "KIXM-536",
+    "KICS-94059",
+    "KICS-4059",
+    "KIXM-493",
+    "KICM-2092",
+    "KIXM-449",
+    "KICM-2065",
+    "KICM-2029",
+    "KIXM-398",
+    "KICS-3785",
+    "KICM-1914",
+    "KICM-1890",
+    "KIXM-340",
+    "KICS-93710",
+    "KICS-3710",
+    "KIXM-315",
+    "KICM-1817",
+    "KICM-1783",
+    "KICS-3477",
+    "KICM-1726",
+    "KICM-1662",
+    "KICM-1641"
+  ],
+  "collection": {
+    "KICM-1641": {
+      "unopened": 2,
+      "opened": 3
+    },
+    "KICM-1662": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-1726": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-1783": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-1817": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-1890": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-1914": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-2029": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-2065": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KICM-2092": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-2128": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICM-2138": {
+      "unopened": 2,
+      "opened": 0
+    },
+    "KICM-2174": {
+      "unopened": 2,
+      "opened": 1
+    },
+    "KICS-3477": {
+      "unopened": 2,
+      "opened": 1
+    },
+    "KICS-3710": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICS-3785": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KICS-4059": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICS-4166": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICS-4217": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KICS-4219": {
+      "unopened": 2,
+      "opened": 0
+    },
+    "KICS-93477": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICS-93710": {
+      "unopened": 3,
+      "opened": 0
+    },
+    "KICS-94059": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICS-94166": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICS-94217": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KICS-94219": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KIXM-315": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KIXM-340": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KIXM-398": {
+      "unopened": 2,
+      "opened": 0
+    },
+    "KIXM-449": {
+      "unopened": 1,
+      "opened": 0
+    },
+    "KIXM-493": {
+      "unopened": 2,
+      "opened": 1
+    },
+    "KIXM-536": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KIXM-578": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KIXM-618": {
+      "unopened": 1,
+      "opened": 1
+    },
+    "KIXM-648": {
+      "unopened": 1,
+      "opened": 1
+    }
+  },
+  "settings": {
+    "view": "grid",
+    "category": "all",
+    "owned": "all",
+    "open": "all",
+    "query": "",
+    "sort": "dateDesc"
+  }
+}

@@ -1,0 +1,51 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-inori: #79c8ed;
+  --color-inori-50: #f2fafe;
+  --color-inori-100: #e3f4fc;
+  --color-inori-200: #c4e7f8;
+  --color-inori-300: #9fd7f2;
+  --color-inori-500: #79c8ed;
+  --color-inori-600: #3fa9dc;
+  --color-inori-700: #1f86b8;
+  --color-inori-800: #176a93;
+  --color-inori-900: #12506f;
+  --font-sans: system-ui, -apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', Meiryo,
+    sans-serif;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-white text-slate-800 antialiased;
+    overscroll-behavior-y: none;
+  }
+  button {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-inori-700);
+    outline-offset: 2px;
+  }
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 0.75rem);
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
