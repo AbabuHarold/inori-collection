@@ -5,11 +5,28 @@ import { forgetJacket } from '../lib/offline';
 
 /**
  * ジャケット画像。所持状況に関係なく常にカラー表示。
- * 画像URLの候補を先頭から順に試し、すべて失敗したら CD 風のプレースホルダーを表示する。
+ *
+ * 表示の優先順位：
+ *   1. 自分で設定した画像（userUrl。端末内に保存した画像の object URL）
+ *   2. 公式の配信元の画像（個人用版のみ。候補を先頭から順に試す）
+ *   3. CD 風のプレースホルダー
  * 縦長・横長のジャケット（ライブBlu-ray・BOX仕様など）も切れないよう、全体が収まるように表示する。
  */
-export const Jacket = memo(function Jacket({ release, className = '' }: { release: Release; className?: string }) {
+export const Jacket = memo(function Jacket({
+  release,
+  userUrl = null,
+  className = '',
+  hint = null,
+}: {
+  release: Release;
+  /** 自分で設定した画像の URL（なければ null） */
+  userUrl?: string | null;
+  className?: string;
+  /** プレースホルダーに添える短い案内（公開版の「タップで画像を設定」など） */
+  hint?: string | null;
+}) {
   const [index, setIndex] = useState(0);
+  const [userFailed, setUserFailed] = useState(false);
   const urls = release.jacketUrls;
   // オフライン中に失敗した画像は、オンライン復帰時に最初の候補から読み込み直す
   useEffect(() => {
@@ -17,12 +34,27 @@ export const Jacket = memo(function Jacket({ release, className = '' }: { releas
     window.addEventListener('online', retry);
     return () => window.removeEventListener('online', retry);
   }, []);
+  // 設定した画像が変わったら、もう一度その画像から表示を試す
+  useEffect(() => setUserFailed(false), [userUrl]);
+
+  const showUser = userUrl !== null && !userFailed;
   const url = index < urls.length ? urls[index] : null;
   const exhausted = urls.length > 0 && url === null;
 
   return (
     <div className={`relative aspect-square overflow-hidden bg-slate-100 ${className}`}>
-      {url ? (
+      {showUser ? (
+        <img
+          key={userUrl}
+          src={userUrl}
+          alt={`${release.title} ジャケット（自分で設定した画像）`}
+          decoding="async"
+          draggable={false}
+          data-user-jacket=""
+          onError={() => setUserFailed(true)}
+          className="h-full w-full object-contain"
+        />
+      ) : url ? (
         <img
           key={url}
           src={url}
@@ -51,7 +83,7 @@ export const Jacket = memo(function Jacket({ release, className = '' }: { releas
             <circle cx="32" cy="32" r="4" fill="#ffffff" />
           </svg>
           <span className="line-clamp-2 text-[11px] leading-tight font-semibold text-inori-900">{release.title}</span>
-          <span className="text-[10px] text-inori-800">{exhausted ? '画像を読み込めません' : CATEGORY_LABEL[release.category]}</span>
+          <span className="text-[10px] text-inori-800">{exhausted ? '画像を読み込めません' : (hint ?? CATEGORY_LABEL[release.category])}</span>
         </div>
       )}
     </div>

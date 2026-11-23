@@ -3,6 +3,7 @@
 //
 // 各形態の画像候補（キングレコード → 水瀬いのり公式サイト）を順に取得し、
 // 「画像（image/*）が返るか」を確認して一覧表示する。少なくとも1つの候補が有効なら表示可能。
+// 対象は個人用版の画像一覧（src/data/jackets.ts）。公開版は画像を取得しないため確認は不要。
 import { RELEASES } from '../src/data/releases.ts';
 
 const pad = (s, n) => (s + ' '.repeat(n)).slice(0, n);

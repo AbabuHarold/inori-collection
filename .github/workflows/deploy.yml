@@ -8,6 +8,11 @@
 #
 # アプリのファイル（package.json）は、リポジトリの直下・inori-collection フォルダーの
 # どちらに置いても動きます（自動で判別します）。
+#
+# 公開する版の切り替え（v1.2.0〜）：
+#   リポジトリの Settings → Secrets and variables → Actions → Variables に
+#   INORI_EDITION = public を追加すると「公開版」（ジャケット画像を配信元から取得しない版）を公開します。
+#   未設定（または personal）なら、これまでどおり「個人用版」を公開します。
 
 name: Deploy to GitHub Pages
 
@@ -53,8 +58,9 @@ jobs:
         run: |
           missing=0
           for f in index.html package.json package-lock.json tsconfig.json vite.config.ts \
-                   src/main.tsx src/App.tsx src/data/releases.ts src/lib/backup.ts src/lib/offline.ts \
-                   src/components/Jacket.tsx public/favicon.svg public/icons/icon-192.png public/icons/icon-512.png \
+                   src/main.tsx src/App.tsx src/edition.ts src/data/releases.ts src/data/jackets.ts src/data/jackets.public.ts \
+                   src/lib/backup.ts src/lib/offline.ts src/lib/userJackets.ts src/lib/imageProcess.ts \
+                   src/components/Jacket.tsx src/components/DetailSheet.tsx public/favicon.svg public/icons/icon-192.png public/icons/icon-512.png \
                    tests/data.test.ts tests/backup.test.ts tests/fixtures/backup-v1.0.0-34forms.zip; do
             if [ ! -f "$f" ]; then
               echo "::error::ファイルが見つかりません: ${{ steps.app.outputs.dir }}/$f"
@@ -92,8 +98,11 @@ jobs:
           # 例：https://<ユーザー名>.github.io/inori-collection/ → /inori-collection/
           #     独自ドメインで公開している場合 → /
           BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+          # personal（個人用版・既定）または public（公開版）
+          INORI_EDITION: ${{ vars.INORI_EDITION || 'personal' }}
         run: |
           echo "公開パス: $BASE_PATH"
+          echo "公開する版: $INORI_EDITION"
           npm run build
 
       # 公開パスに合わせたビルドになっているかを確認する（合っていないと真っ白な画面になるため、その場合は公開しない）
@@ -111,6 +120,17 @@ jobs:
             exit 1
           fi
           echo "公開パス ${BASE_PATH} に合ったビルドです（バージョン $(node -p "require('./package.json').version")）"
+
+      # 公開版には画像のURLが1つも含まれていないことを確認する（含まれていたら公開しない）
+      - name: Check the public edition
+        if: ${{ vars.INORI_EDITION == 'public' }}
+        working-directory: ${{ steps.app.outputs.dir }}
+        run: |
+          if grep -rlE "/img/goods/|wp-content/uploads|/img/disco/" dist; then
+            echo "::error::公開版のビルドにジャケット画像のURLが含まれています（上のファイル）。公開を中止しました"
+            exit 1
+          fi
+          echo "公開版：ジャケット画像のURLは含まれていません"
 
       - name: Upload the built app
         uses: actions/upload-pages-artifact@v5

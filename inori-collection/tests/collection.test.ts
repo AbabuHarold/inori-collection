@@ -58,10 +58,12 @@ describe('集計', () => {
 
   it('コンプリート率 = 所持形態数 / 全形態数 × 100', () => {
     const c: Collection = {};
-    RELEASES.slice(0, RELEASES.length / 2).forEach((r) => (c[r.id] = { unopened: 0, opened: 1 }));
+    // 39形態のうち13形態を所持 → 33.33…%（表示は切り捨てで 33.3%）
+    expect(RELEASES).toHaveLength(39);
+    RELEASES.slice(0, 13).forEach((r) => (c[r.id] = { unopened: 0, opened: 1 }));
     const s = computeStats(RELEASES, c);
-    expect(s.completion).toBeCloseTo(50);
-    expect(formatCompletion(s.completion)).toBe('50%');
+    expect(s.completion).toBeCloseTo(100 / 3);
+    expect(formatCompletion(s.completion)).toBe('33.3%');
   });
 
   it('全形態0件でも0除算しない', () => {
@@ -91,9 +93,10 @@ describe('検索・絞り込み', () => {
   };
 
   it('カテゴリー', () => {
-    expect(filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, category: 'single' })).toHaveLength(13);
+    expect(filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, category: 'single' })).toHaveLength(14);
     expect(filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, category: 'album' })).toHaveLength(14);
     expect(filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, category: 'bluray' })).toHaveLength(9);
+    expect(ids(filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, category: 'clips' }))).toEqual(['KIXM-379', 'KIXM-627']);
   });
 
   it('所持状況', () => {
@@ -132,7 +135,9 @@ describe('並び替え', () => {
 
   it('発売日が新しい順', () => {
     const list = filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, sort: 'dateDesc' });
-    expect(list[0].id).toBe('KICM-2174');
+    // 発売予定の 14th Single（2027-01-27）が先頭
+    expect(list[0].id).toBe('KICM-2183');
+    expect(list[1].id).toBe('KICM-2174');
     for (let i = 1; i < list.length; i++) expect(list[i - 1].releaseDate >= list[i].releaseDate).toBe(true);
   });
 
@@ -142,12 +147,26 @@ describe('並び替え', () => {
     for (let i = 1; i < list.length; i++) expect(c.compare(list[i - 1].title, list[i].title)).toBeLessThanOrEqual(0);
   });
 
-  it('カテゴリー順（シングル→アルバム→ライブBlu-ray、各カテゴリー内は発売日順）', () => {
+  it('カテゴリー順（シングル→アルバム→ライブBlu-ray→MUSIC CLIP BOX、各カテゴリー内は発売日順）', () => {
     const list = filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, sort: 'category' });
     const cats = list.map((r) => r.category);
-    expect(cats.indexOf('album')).toBe(13);
-    expect(cats.indexOf('bluray')).toBe(27);
-    expect(cats.lastIndexOf('single')).toBe(12);
+    expect(cats.lastIndexOf('single')).toBe(13);
+    expect(cats.indexOf('album')).toBe(14);
+    expect(cats.indexOf('bluray')).toBe(28);
+    expect(cats.indexOf('clips')).toBe(37);
+    expect(ids(list.slice(37))).toEqual(['KIXM-379', 'KIXM-627']);
+  });
+
+  it('MUSIC CLIP BOX は発売日順でほかの作品の間に並ぶ（初期の古い順）', () => {
+    const list = ids(filterAndSort(RELEASES, {}, DEFAULT_SETTINGS));
+    // 2019-04-10 Catch the Rainbow！ → 2019-06-26 MUSIC CLIP BOX → 2019-10-23 LIVE TOUR Catch the Rainbow！
+    expect(list.indexOf('KIXM-379')).toBe(list.indexOf('KICS-3785') + 1);
+    expect(list.indexOf('KIXM-398')).toBe(list.indexOf('KIXM-379') + 1);
+  });
+
+  it('作品名検索で MUSIC CLIP BOX を探せる', () => {
+    expect(ids(filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, query: 'music clip' }))).toEqual(['KIXM-379', 'KIXM-627']);
+    expect(ids(filterAndSort(RELEASES, {}, { ...DEFAULT_SETTINGS, query: 'ロマンス' }))).toEqual(['KICM-2183']);
   });
 });
 
@@ -160,6 +179,9 @@ describe('表示設定の検証', () => {
     });
     expect(sanitizeSettings(null)).toEqual(DEFAULT_SETTINGS);
     expect(sanitizeSettings({ query: 'a'.repeat(500) }).query).toHaveLength(100);
+    // v1.2.0 で追加したカテゴリー（MUSIC CLIP BOX）も保存・復元できる
+    expect(sanitizeSettings({ category: 'clips' }).category).toBe('clips');
+    expect(sanitizeSettings({ category: 'dvd' }).category).toBe('all');
   });
 
   it('初期状態は 全作品・発売日が古い順・グリッド・キーワードなし', () => {

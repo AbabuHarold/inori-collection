@@ -48,7 +48,7 @@ if (!process.env.E2E_SKIP_BUILD) {
   execSync('npx vite build --outDir dist-pages-e2e-v2', {
     cwd: ROOT,
     stdio: 'ignore',
-    env: { ...process.env, BASE_PATH: PREFIX, APP_VERSION_OVERRIDE: '1.1.1-pages-e2e' },
+    env: { ...process.env, BASE_PATH: PREFIX, APP_VERSION_OVERRIDE: '1.2.0-pages-e2e' },
   });
 }
 
@@ -116,7 +116,7 @@ const ctx = await browser.newContext({
     'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36',
 });
 await ctx.route(/^https?:\/\/(?!localhost)/, (route) => route.abort());
-await ctx.route(/^https:\/\/(www\.kingrecords\.co\.jp\/img\/goods|www\.inoriminase\.com\/img\/disco)\//, (route) => {
+await ctx.route(/^https:\/\/(www\.kingrecords\.co\.jp\/img\/goods|inoriminase\.com\/wp\/wp-content\/uploads)\//, (route) => {
   if (networkDown) return route.abort('internetdisconnected');
   imageRequests++;
   return route.fulfill({ status: 200, contentType: 'image/jpeg', body: DUMMY_IMG });
@@ -145,15 +145,15 @@ async function settingsVersion() {
   await page.getByRole('heading', { name: '設定' }).waitFor();
   const text = await page.locator('dialog[open]').last().innerText();
   await page.locator('dialog[open] header button[aria-label="閉じる"]').last().click();
-  return /アプリのバージョン：(\S+)/.exec(text)?.[1];
+  return /アプリのバージョン：([^\s（]+)/.exec(text)?.[1];
 }
 
 console.log(`GitHub Pages 形式のサーバー: ${APP}`);
 
-await step('サブパス（/inori-collection/）で開くと、36形態が表示され、エラーが出ない', async () => {
+await step('サブパス（/inori-collection/）で開くと、39形態が表示され、エラーが出ない', async () => {
   await page.goto(APP);
   await page.locator('[data-testid=release]').first().waitFor({ timeout: 20000 });
-  eq(await page.locator('[data-testid=release]').count(), 36, '表示件数');
+  eq(await page.locator('[data-testid=release]').count(), 39, '表示件数');
   eq(pageErrors, [], 'エラー');
   await page.screenshot({ path: resolve(OUT, 'pages-01-initial.png') });
 });
@@ -226,7 +226,7 @@ await step('Service Worker が /inori-collection/ の範囲で有効になり、
   await page.locator('[data-testid=offline-pill][data-state=ready]').waitFor({ timeout: 40000 });
   eq((await page.getByTestId('offline-pill').textContent()).trim(), 'オフラインOK', 'ヘッダー表示');
   const cached = await page.evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length);
-  eq(cached, 36, 'ジャケットのキャッシュ数');
+  eq(cached, 39, 'ジャケットのキャッシュ数');
 });
 
 // 注：Chrome の Page.getInstallabilityErrors はこのテスト環境（ヘッドレス）ではマニフェストが 404 でも
@@ -288,7 +288,7 @@ await step('オフライン（機内モード相当）でも /inori-collection/ 
   await ctx.setOffline(true);
   await page.goto(APP);
   await page.locator('[data-testid=release]').first().waitFor({ timeout: 15000 });
-  eq(await page.locator('[data-testid=release]').count(), 36, 'オフライン一覧');
+  eq(await page.locator('[data-testid=release]').count(), 39, 'オフライン一覧');
   for (let i = 0; i < 8; i++) {
     await page.mouse.wheel(0, 2000);
     await page.waitForTimeout(150);
@@ -298,7 +298,7 @@ await step('オフライン（機内モード相当）でも /inori-collection/ 
     const imgs = [...document.querySelectorAll('[data-testid=release] img')];
     return { n: imgs.length, ok: imgs.filter((i) => i.naturalWidth > 0).length };
   });
-  eq(r, { n: 36, ok: 36 }, 'オフラインのジャケット');
+  eq(r, { n: 39, ok: 39 }, 'オフラインのジャケット');
   eq(imageRequests, 0, '外部への画像リクエスト');
   eq(await counts('KICM-1641'), { unopened: 1, opened: 0 }, 'オフラインで所持データ');
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -331,7 +331,7 @@ await step('新しいバージョンを公開すると「更新する」で切�
   await page.getByText('新しいバージョンがあります').waitFor({ timeout: 30000 });
   await Promise.all([page.waitForEvent('load', { timeout: 30000 }), page.getByRole('button', { name: '更新する' }).click()]);
   await page.locator('[data-testid=release]').first().waitFor();
-  eq(await settingsVersion(), '1.1.1-pages-e2e', '更新後のバージョン');
+  eq(await settingsVersion(), '1.2.0-pages-e2e', '更新後のバージョン');
   eq(await counts('KICM-1641'), { unopened: 1, opened: 0 }, '更新後の所持データ');
   eq(new URL(page.url()).pathname, PREFIX, '更新後のURL');
 });
@@ -341,7 +341,7 @@ await step('更新後もオフラインで起動できる', async () => {
   await ctx.setOffline(true);
   await page.reload();
   await page.locator('[data-testid=release]').first().waitFor({ timeout: 15000 });
-  eq(await settingsVersion(), '1.1.1-pages-e2e', 'オフラインでのバージョン');
+  eq(await settingsVersion(), '1.2.0-pages-e2e', 'オフラインでのバージョン');
   networkDown = false;
   await ctx.setOffline(false);
   eq(outsideRequests, [], '/inori-collection/ の外へのリクエスト');

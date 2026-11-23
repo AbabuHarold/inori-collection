@@ -18,8 +18,22 @@ import {
 } from './lib/collection';
 import { KEYS, countCorrupted, loadCollection, loadSettings, requestPersistentStorage, saveCollection, saveSettings } from './lib/storage';
 import { BackupError, type ParsedBackup, LIMITS, backupFileName, buildBackupPayload, createBackupZip, parseBackupZip } from './lib/backup';
-import { type JacketReport, appShellReady, cacheApiAvailable, prepareJackets, scanCached, summarize } from './lib/offline';
+import { type JacketReport, type JacketState, appShellReady, cacheApiAvailable, prepareJackets, scanCached, summarize } from './lib/offline';
+import {
+  type UserJacket,
+  UserJacketError,
+  deleteUserJacket,
+  listUserJackets,
+  onUserJacketsChangedElsewhere,
+  putUserJacket,
+  replaceAllUserJackets,
+  totalBytes,
+  userJacketsSupported,
+} from './lib/userJackets';
+import { ImageProcessError, processUserImage } from './lib/imageProcess';
+import { EDITION } from './edition';
 import { ReleaseCard, ReleaseRow } from './components/ReleaseItem';
+import { DetailSheet, type UserJacketAvailability } from './components/DetailSheet';
 import { StatsPanel } from './components/StatsPanel';
 import { Toolbar } from './components/Toolbar';
 import { Banner, Modal, UndoToast } from './components/Overlay';
@@ -30,7 +44,10 @@ declare const __APP_VERSION__: string;
 
 type UndoEntry =
   | { kind: 'count'; id: string; before: Holding }
-  | { kind: 'restore'; beforeCollection: Collection; beforeSettings: Settings };
+  /** 自分で設定したジャケット画像の変更（before が null なら変更前は未設定） */
+  | { kind: 'jacket'; id: string; before: UserJacket | null }
+  /** beforeJackets が null なら、復元で画像は変更していない */
+  | { kind: 'restore'; beforeCollection: Collection; beforeSettings: Settings; beforeJackets: UserJacket[] | null };
 
 interface Toast {
   message: string;
@@ -39,7 +56,8 @@ interface Toast {
 
 const FIELD_LABEL: Record<CountField, string> = { unopened: '未開封', opened: '開封済' };
 const RELEASE_BY_ID = new Map<string, Release>(RELEASES.map((r) => [r.id, r]));
-const JACKET_TARGETS = RELEASES.map((r) => ({ id: r.id, jacketUrls: r.jacketUrls }));
+/** 配信元から画像を取得する形態（公開版では空＝何も取得しない） */
+const JACKET_TARGETS = RELEASES.filter((r) => r.jacketUrls.length > 0).map((r) => ({ id: r.id, jacketUrls: r.jacketUrls }));
 const TITLE_OF = (id: string) => {
   const r = RELEASE_BY_ID.get(id);
   return r ? `${r.title}（${editionLabel(r)}）` : id;
@@ -56,6 +74,35 @@ function downloadBlob(blob: Blob, name: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+type UserJacketMap = ReadonlyMap<string, UserJacket>;
+
+/** 端末内に保存した画像を <img> で表示するための object URL を、画像が変わったときだけ作り直す */
+function useObjectUrls(jackets: UserJacketMap): Readonly<Record<string, string>> {
+  const cache = useRef(new Map<string, { jacket: UserJacket; url: string }>());
+  const urls = useMemo(() => {
+    const out: Record<string, string> = {};
+    const next = new Map<string, { jacket: UserJacket; url: string }>();
+    for (const [id, j] of jackets) {
+      const prev = cache.current.get(id);
+      const entry = prev && prev.jacket === j ? prev : { jacket: j, url: URL.createObjectURL(new Blob([j.data], { type: j.type })) };
+      next.set(id, entry);
+      out[id] = entry.url;
+    }
+    // 使わなくなった URL は少し待ってから解放する（表示の切り替え中に消えないように）
+    const stale = [...cache.current.values()].filter((e) => next.get(e.jacket.id)?.url !== e.url).map((e) => e.url);
+    if (stale.length) window.setTimeout(() => stale.forEach((u) => URL.revokeObjectURL(u)), 10_000);
+    cache.current = next;
+    return out;
+  }, [jackets]);
+  // 画面（App）は閉じるまで表示し続けるので、アンマウント時の一括解放はしない
+  // （開発時の StrictMode の仮アンマウントで、表示中の URL まで解放されてしまうため）
+  return urls;
+}
+
+function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof UserJacketError || e instanceof ImageProcessError || e instanceof BackupError ? e.message : fallback;
 }
 
 function formatDateTime(d: Date | null): string {
@@ -100,6 +147,33 @@ export default function App() {
     [],
   );
 
+  // ───────────── 自分で設定したジャケット画像 ─────────────
+  const [userJackets, setUserJackets] = useState<UserJacketMap>(() => new Map());
+  const userJacketsRef = useRef<UserJacketMap>(userJackets);
+  const [jacketAvailability, setJacketAvailability] = useState<UserJacketAvailability>(() =>
+    userJacketsSupported() ? 'loading' : 'unsupported',
+  );
+  const setJacketMap = useCallback((m: UserJacketMap) => {
+    userJacketsRef.current = m;
+    setUserJackets(m);
+  }, []);
+  const reloadUserJackets = useCallback(async () => {
+    if (!userJacketsSupported()) return;
+    try {
+      const list = await listUserJackets();
+      setJacketMap(new Map(list.map((j) => [j.id, j])));
+      setJacketAvailability('ready');
+    } catch {
+      setJacketAvailability('unsupported');
+    }
+  }, [setJacketMap]);
+  useEffect(() => {
+    void reloadUserJackets();
+    return onUserJacketsChangedElsewhere(() => void reloadUserJackets());
+  }, [reloadUserJackets]);
+  const userJacketUrls = useObjectUrls(userJackets);
+  const userJacketBytes = useMemo(() => totalBytes(userJackets.values()), [userJackets]);
+
   // ───────────── 元に戻す ─────────────
   const undoStack = useRef<UndoEntry[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -134,18 +208,75 @@ export default function App() {
     [commit, showToast],
   );
 
+  /** 1形態の画像を保存（next が null なら削除）して画面に反映する。失敗したら例外 */
+  const writeUserJacket = useCallback(
+    async (id: string, next: UserJacket | null) => {
+      if (next) await putUserJacket(next);
+      else await deleteUserJacket(id);
+      const m = new Map(userJacketsRef.current);
+      if (next) m.set(id, next);
+      else m.delete(id);
+      setJacketMap(m);
+    },
+    [setJacketMap],
+  );
+
   const undo = useCallback(() => {
     const e = undoStack.current.pop();
     if (!e) return;
+    const remaining = undoStack.current.length;
+    const done = () => showToast(remaining > 0 ? `元に戻しました（あと${remaining}回戻せます）` : '元に戻しました', remaining > 0);
     if (e.kind === 'count') {
       commit(setHolding(collectionRef.current, e.id, e.before));
+      done();
+    } else if (e.kind === 'jacket') {
+      writeUserJacket(e.id, e.before).then(done, (err) => showToast(errorMessage(err, '画像を元に戻せませんでした。'), false, 8000));
     } else {
       commit(e.beforeCollection);
       setSettings(e.beforeSettings);
+      if (e.beforeJackets) {
+        const before = e.beforeJackets;
+        replaceAllUserJackets(before).then(
+          () => {
+            setJacketMap(new Map(before.map((j) => [j.id, j])));
+            done();
+          },
+          (err) => showToast(errorMessage(err, '画像を元に戻せませんでした。'), false, 8000),
+        );
+      } else done();
     }
-    const remaining = undoStack.current.length;
-    showToast(remaining > 0 ? `元に戻しました（あと${remaining}回戻せます）` : '元に戻しました', remaining > 0);
-  }, [commit, showToast]);
+  }, [commit, showToast, writeUserJacket, setJacketMap]);
+
+  // ───────────── 作品の詳細・ジャケット画像の設定 ─────────────
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [jacketBusy, setJacketBusy] = useState(false);
+  const [jacketError, setJacketError] = useState<string | null>(null);
+  const openDetail = useCallback((id: string) => {
+    setJacketError(null);
+    setDetailId(id);
+  }, []);
+  const closeDetail = useCallback(() => setDetailId(null), []);
+
+  const changeUserJacket = useCallback(
+    async (id: string, file: File | null) => {
+      setJacketError(null);
+      setJacketBusy(true);
+      try {
+        const before = userJacketsRef.current.get(id) ?? null;
+        const next = file ? await processUserImage(file, id) : null;
+        await writeUserJacket(id, next);
+        undoStack.current.push({ kind: 'jacket', id, before });
+        if (undoStack.current.length > UNDO_LIMIT) undoStack.current.shift();
+        showToast(`「${TITLE_OF(id)}」の画像を${next ? '設定' : '削除'}しました`, true);
+        if (!next) setDetailId(null);
+      } catch (e) {
+        setJacketError(errorMessage(e, '画像を保存できませんでした。'));
+      } finally {
+        setJacketBusy(false);
+      }
+    },
+    [writeUserJacket, showToast],
+  );
 
   // ───────────── 他のタブで変更されたときの同期 ─────────────
   useEffect(() => {
@@ -266,17 +397,23 @@ export default function App() {
     };
   }, [runPrepare, refreshAppShell]);
 
+  // 自分で画像を設定した形態は、配信元の画像がなくても端末内に画像がある（オフラインで表示できる）
+  const effectiveJackets = useMemo(() => {
+    if (userJackets.size === 0) return jackets;
+    const states: Record<string, JacketState> = { ...jackets.states };
+    for (const t of JACKET_TARGETS) if (userJackets.has(t.id)) states[t.id] = 'cached';
+    return summarize(JACKET_TARGETS, states);
+  }, [jackets, userJackets]);
+
   const offlineStatus: OfflineStatus = {
     online,
     swSupported: 'serviceWorker' in navigator,
     cacheSupported: cacheApiAvailable(),
     appShell,
-    jacketsCached: jackets.cached,
-    jacketsUnavailable: jackets.unavailable,
-    jacketsTotal: jackets.total,
-    unavailableTitles: Object.entries(jackets.states)
-      .filter(([, s]) => s === 'unavailable')
-      .map(([id]) => TITLE_OF(id)),
+    jacketsCached: effectiveJackets.cached,
+    jacketsUnavailable: effectiveJackets.unavailable,
+    jacketsTotal: effectiveJackets.total,
+    unavailableTitles: JACKET_TARGETS.filter((t) => effectiveJackets.states[t.id] === 'unavailable').map((t) => TITLE_OF(t.id)),
     preparing,
   };
   const offlineInfo = offlineSummary(offlineStatus);
@@ -285,11 +422,11 @@ export default function App() {
     offlineInfo.state === 'ready'
       ? 'オフラインOK'
       : offlineInfo.state === 'partial'
-        ? `画像なし${jackets.unavailable}件`
+        ? `画像なし${effectiveJackets.unavailable}件`
         : !online
           ? 'オフライン'
           : preparing
-            ? `準備中 ${jackets.cached + jackets.unavailable}/${jackets.total}`
+            ? `準備中 ${effectiveJackets.cached + effectiveJackets.unavailable}/${effectiveJackets.total}`
             : 'オフライン未準備';
 
   // ───────────── バックアップ ─────────────
@@ -311,8 +448,13 @@ export default function App() {
     async (mode: 'download' | 'share') => {
       setBackupBusy(true);
       try {
-        const payload = buildBackupPayload(collectionRef.current, settingsRef.current, MASTER_VERSION);
-        const bytes = await createBackupZip(payload);
+        // 画像の保存領域を使えない端末では「画像の情報なし」として作成する（復元先の画像を消さないため）
+        const list = jacketAvailability === 'ready' ? [...userJacketsRef.current.values()] : null;
+        const payload = buildBackupPayload(collectionRef.current, settingsRef.current, MASTER_VERSION, new Date(), list, {
+          version: __APP_VERSION__,
+          edition: EDITION,
+        });
+        const bytes = await createBackupZip(payload, list ?? []);
         const name = backupFileName();
         const blob = new Blob([bytes as BlobPart], { type: 'application/zip' });
         if (mode === 'share') {
@@ -329,7 +471,7 @@ export default function App() {
         setBackupBusy(false);
       }
     },
-    [showToast],
+    [showToast, jacketAvailability],
   );
 
   const pickRestoreFile = useCallback(async (file: File) => {
@@ -347,27 +489,58 @@ export default function App() {
     }
   }, []);
 
-  const confirmRestore = useCallback(() => {
-    if (!pendingRestore) return;
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const confirmRestore = useCallback(async () => {
+    if (!pendingRestore || confirmBusy) return;
     const { parsed } = pendingRestore;
-    // 先に保存を試み、成功した場合だけ画面に反映する（失敗時は既存データをそのまま維持）
-    const r = saveCollection(parsed.collection);
-    if (!r.ok) {
+    setConfirmBusy(true);
+    try {
+      // 画像 → 所持データの順に保存し、どちらかが失敗したら両方とも元のまま（画像は元に戻す）にする
+      let beforeJackets = [...userJacketsRef.current.values()];
+      const replaceJackets = parsed.jackets !== null && jacketAvailability !== 'unsupported';
+      if (replaceJackets) {
+        try {
+          // 起動直後で画像の読み込みが終わっていなければ、置き換え前の画像をここで読み込んでおく（元に戻せるように）
+          if (jacketAvailability !== 'ready') beforeJackets = await listUserJackets();
+          await replaceAllUserJackets(parsed.jackets!);
+        } catch (e) {
+          setPendingRestore(null);
+          setRestoreError(`復元に失敗しました。${errorMessage(e, '画像を保存できませんでした。')}現在のデータは変更されていません。`);
+          return;
+        }
+      }
+      const r = saveCollection(parsed.collection);
+      if (!r.ok) {
+        if (replaceJackets) await replaceAllUserJackets(beforeJackets).catch(() => {});
+        setPendingRestore(null);
+        setRestoreError(`復元に失敗しました。${r.message}現在のデータは変更されていません。`);
+        return;
+      }
+      undoStack.current = [
+        {
+          kind: 'restore',
+          beforeCollection: collectionRef.current,
+          beforeSettings: settingsRef.current,
+          beforeJackets: replaceJackets ? beforeJackets : null,
+        },
+      ];
+      blockSavesRef.current = false;
+      setBlockSaves(false);
+      collectionRef.current = parsed.collection;
+      setCollection(parsed.collection);
+      setSettings(parsed.settings);
+      setSaveError(null);
       setPendingRestore(null);
-      setRestoreError(`復元に失敗しました。${r.message}現在のデータは変更されていません。`);
-      return;
+      setSettingsOpen(false);
+      if (replaceJackets) {
+        setJacketMap(new Map(parsed.jackets!.map((j) => [j.id, j])));
+        setJacketAvailability('ready');
+      }
+      showToast('バックアップから復元しました', true, 15000);
+    } finally {
+      setConfirmBusy(false);
     }
-    undoStack.current = [{ kind: 'restore', beforeCollection: collectionRef.current, beforeSettings: settingsRef.current }];
-    blockSavesRef.current = false;
-    setBlockSaves(false);
-    collectionRef.current = parsed.collection;
-    setCollection(parsed.collection);
-    setSettings(parsed.settings);
-    setSaveError(null);
-    setPendingRestore(null);
-    setSettingsOpen(false);
-    showToast('バックアップから復元しました', true, 15000);
-  }, [pendingRestore, showToast]);
+  }, [pendingRestore, confirmBusy, jacketAvailability, setJacketMap, showToast]);
 
   // ───────────── 表示 ─────────────
   const stats = useMemo(() => computeStats(RELEASES, collection), [collection]);
@@ -510,13 +683,27 @@ export default function App() {
         ) : settings.view === 'grid' ? (
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5" data-testid="grid">
             {visible.map((r) => (
-              <ReleaseCard key={r.id} release={r} holding={getHolding(collection, r.id)} onChange={changeCount} />
+              <ReleaseCard
+                key={r.id}
+                release={r}
+                holding={getHolding(collection, r.id)}
+                onChange={changeCount}
+                userJacketUrl={userJacketUrls[r.id] ?? null}
+                onOpen={openDetail}
+              />
             ))}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2" data-testid="list">
             {visible.map((r) => (
-              <ReleaseRow key={r.id} release={r} holding={getHolding(collection, r.id)} onChange={changeCount} />
+              <ReleaseRow
+                key={r.id}
+                release={r}
+                holding={getHolding(collection, r.id)}
+                onChange={changeCount}
+                userJacketUrl={userJacketUrls[r.id] ?? null}
+                onOpen={openDetail}
+              />
             ))}
           </div>
         )}
@@ -538,6 +725,20 @@ export default function App() {
         formsTotal={RELEASES.length}
         masterVersion={MASTER_VERSION}
         appVersion={__APP_VERSION__}
+        userJackets={{ count: userJackets.size, bytes: userJacketBytes, availability: jacketAvailability }}
+      />
+
+      <DetailSheet
+        release={detailId ? (RELEASE_BY_ID.get(detailId) ?? null) : null}
+        onClose={closeDetail}
+        holding={getHolding(collection, detailId ?? '')}
+        userJacket={detailId ? (userJackets.get(detailId) ?? null) : null}
+        userJacketUrl={detailId ? (userJacketUrls[detailId] ?? null) : null}
+        availability={jacketAvailability}
+        busy={jacketBusy}
+        error={jacketError}
+        onPickImage={(f) => detailId && void changeUserJacket(detailId, f)}
+        onRemoveImage={() => detailId && void changeUserJacket(detailId, null)}
       />
 
       <Modal
@@ -549,8 +750,14 @@ export default function App() {
             <button type="button" onClick={() => setPendingRestore(null)} className="h-12 flex-1 rounded-2xl border border-slate-300 bg-white font-bold text-slate-700">
               キャンセル
             </button>
-            <button type="button" onClick={confirmRestore} className="h-12 flex-1 rounded-2xl bg-inori-700 font-bold text-white" data-testid="confirm-restore">
-              復元する
+            <button
+              type="button"
+              onClick={() => void confirmRestore()}
+              disabled={confirmBusy}
+              className="h-12 flex-1 rounded-2xl bg-inori-700 font-bold text-white disabled:opacity-50"
+              data-testid="confirm-restore"
+            >
+              {confirmBusy ? '復元中…' : '復元する'}
             </button>
           </div>
         }
@@ -569,7 +776,31 @@ export default function App() {
               <dd>
                 {pendingRestore.parsed.unopened}枚 / {pendingRestore.parsed.opened}枚
               </dd>
+              <dt className="text-slate-500">ジャケット画像</dt>
+              <dd data-testid="restore-jackets">
+                {pendingRestore.parsed.jackets === null ? '含まれていません' : `${pendingRestore.parsed.jackets.length}枚`}
+              </dd>
             </dl>
+            {pendingRestore.parsed.jackets === null ? (
+              userJackets.size > 0 && (
+                <p className="rounded-xl bg-slate-50 p-2 text-slate-700">
+                  このバックアップには画像の情報が含まれていないため、今の端末で設定した画像（{userJackets.size}枚）はそのまま残します。
+                </p>
+              )
+            ) : jacketAvailability === 'unsupported' ? (
+              pendingRestore.parsed.jackets.length > 0 && (
+                <p className="rounded-xl bg-amber-50 p-2 text-amber-900">
+                  このブラウザでは画像を端末内に保存できないため、画像は復元されません（所持枚数と表示設定だけ復元します）。
+                </p>
+              )
+            ) : (
+              (userJackets.size > 0 || pendingRestore.parsed.jackets.length > 0) && (
+                <p className="rounded-xl bg-slate-50 p-2 text-slate-700" data-testid="restore-jackets-note">
+                  自分で設定した画像は、バックアップの画像（{pendingRestore.parsed.jackets.length}枚）に置き換わります
+                  {userJackets.size > 0 && `（今の端末の画像 ${userJackets.size} 枚は削除されます）`}。
+                </p>
+              )
+            )}
             {pendingRestore.parsed.unknownIds.length > 0 && (
               <p className="rounded-xl bg-amber-50 p-2 text-amber-900">
                 現在の作品データにない項目が {pendingRestore.parsed.unknownIds.length} 件あります。削除せずにそのまま保持します。

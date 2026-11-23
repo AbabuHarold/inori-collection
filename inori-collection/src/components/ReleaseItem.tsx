@@ -4,12 +4,20 @@ import { CATEGORY_LABEL, editionLabel } from '../data/releases';
 import type { CountField, Holding } from '../lib/collection';
 import { Counter, OwnedBadge } from './Counter';
 import { Jacket } from './Jacket';
+import { IS_PUBLIC_EDITION } from '../edition';
 
 interface Props {
   release: Release;
   holding: Holding;
   onChange: (id: string, field: CountField, delta: 1 | -1) => void;
+  /** 自分で設定したジャケット画像の URL */
+  userJacketUrl: string | null;
+  /** ジャケットをタップしたとき（作品の詳細・画像の設定を開く） */
+  onOpen: (id: string) => void;
 }
+
+/** 公開版で、まだ画像を設定していない形態のプレースホルダーに出す案内 */
+const PLACEHOLDER_HINT = IS_PUBLIC_EDITION ? 'タップで画像を設定' : null;
 
 function useHandlers(release: Release, onChange: Props['onChange']) {
   return useMemo(
@@ -25,10 +33,11 @@ const categoryChip: Record<Release['category'], string> = {
   single: 'bg-inori-100 text-inori-900',
   album: 'bg-sky-100 text-sky-900',
   bluray: 'bg-indigo-100 text-indigo-900',
+  clips: 'bg-violet-100 text-violet-900',
 };
 
 /** グリッド表示用カード */
-export const ReleaseCard = memo(function ReleaseCard({ release, holding, onChange }: Props) {
+export const ReleaseCard = memo(function ReleaseCard({ release, holding, onChange, userJacketUrl, onOpen }: Props) {
   const h = useHandlers(release, onChange);
   const total = holding.unopened + holding.opened;
   const name = `${release.title}（${editionLabel(release)}）`;
@@ -39,8 +48,16 @@ export const ReleaseCard = memo(function ReleaseCard({ release, holding, onChang
       data-id={release.id}
     >
       <div className="relative">
-        <Jacket release={release} />
-        <OwnedBadge total={total} className="absolute top-2 left-2" />
+        <button
+          type="button"
+          onClick={() => onOpen(release.id)}
+          aria-label={`${name}の詳細・ジャケット画像の設定`}
+          className="block w-full active:opacity-80"
+          data-testid="open-detail"
+        >
+          <Jacket release={release} userUrl={userJacketUrl} hint={PLACEHOLDER_HINT} />
+        </button>
+        <OwnedBadge total={total} className="pointer-events-none absolute top-2 left-2" />
       </div>
       <div className="flex flex-1 flex-col gap-1 p-2">
         <h3 className="line-clamp-2 min-h-[2.5em] text-[13px] leading-tight font-bold break-words text-slate-800">{release.title}</h3>
@@ -60,7 +77,7 @@ export const ReleaseCard = memo(function ReleaseCard({ release, holding, onChang
 });
 
 /** リスト表示用の行 */
-export const ReleaseRow = memo(function ReleaseRow({ release, holding, onChange }: Props) {
+export const ReleaseRow = memo(function ReleaseRow({ release, holding, onChange, userJacketUrl, onOpen }: Props) {
   const h = useHandlers(release, onChange);
   const total = holding.unopened + holding.opened;
   const name = `${release.title}（${editionLabel(release)}）`;
@@ -70,7 +87,15 @@ export const ReleaseRow = memo(function ReleaseRow({ release, holding, onChange 
       data-testid="release"
       data-id={release.id}
     >
-      <Jacket release={release} className="w-24 shrink-0 self-start rounded-lg sm:w-28" />
+      <button
+        type="button"
+        onClick={() => onOpen(release.id)}
+        aria-label={`${name}の詳細・ジャケット画像の設定`}
+        className="w-24 shrink-0 self-start overflow-hidden rounded-lg active:opacity-80 sm:w-28"
+        data-testid="open-detail"
+      >
+        <Jacket release={release} userUrl={userJacketUrl} hint={PLACEHOLDER_HINT} />
+      </button>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-start justify-between gap-2">
           <h3 className="line-clamp-2 text-sm leading-tight font-bold break-words text-slate-800">{release.title}</h3>

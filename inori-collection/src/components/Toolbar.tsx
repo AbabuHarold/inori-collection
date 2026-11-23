@@ -7,6 +7,7 @@ import {
   type SortKey,
   MAX_QUERY_LENGTH,
 } from '../lib/collection';
+import { CATEGORY_LABEL } from '../data/releases';
 import { IconFilter, IconGrid, IconList, IconSearch, IconX } from './Icons';
 
 interface Props {
@@ -17,9 +18,10 @@ interface Props {
 
 const CATEGORY_OPTIONS: [CategoryFilter, string][] = [
   ['all', 'すべて'],
-  ['single', 'シングル'],
-  ['album', 'アルバム'],
-  ['bluray', 'ライブBlu-ray'],
+  ['single', CATEGORY_LABEL.single],
+  ['album', CATEGORY_LABEL.album],
+  ['bluray', CATEGORY_LABEL.bluray],
+  ['clips', CATEGORY_LABEL.clips],
 ];
 const OWNED_OPTIONS: [OwnedFilter, string][] = [
   ['all', 'すべて'],

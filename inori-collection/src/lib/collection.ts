@@ -125,7 +125,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 
 export const SETTING_VALUES = {
   view: ['grid', 'list'],
-  category: ['all', 'single', 'album', 'bluray'],
+  category: ['all', 'single', 'album', 'bluray', 'clips'],
   owned: ['all', 'owned', 'missing'],
   open: ['all', 'hasUnopened', 'hasOpened'],
   sort: ['dateAsc', 'dateDesc', 'title', 'category'],

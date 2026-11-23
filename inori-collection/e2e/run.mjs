@@ -12,6 +12,8 @@ import { startServer } from './server.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const APP_VERSION = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8')).version;
+/** 現在の作品マスターの形態数（v1.2.0：39形態） */
+const TOTAL = 39;
 const OUT = resolve(process.env.E2E_OUT || resolve(ROOT, 'e2e/output'));
 mkdirSync(OUT, { recursive: true });
 
@@ -41,7 +43,7 @@ if (!process.env.E2E_SKIP_BUILD) {
   console.log('build v1 …');
   execSync('npx vite build', { cwd: ROOT, stdio: 'ignore' });
   console.log('build v2 (更新テスト用) …');
-  execSync('npx vite build --outDir dist-e2e-v2', { cwd: ROOT, stdio: 'ignore', env: { ...process.env, APP_VERSION_OVERRIDE: '1.1.1-e2e' } });
+  execSync('npx vite build --outDir dist-e2e-v2', { cwd: ROOT, stdio: 'ignore', env: { ...process.env, APP_VERSION_OVERRIDE: '1.2.0-e2e' } });
 }
 const server = await startServer(resolve(ROOT, 'dist'), 4173);
 const BASE = server.url;
@@ -72,7 +74,12 @@ async function newDevice(width = 375, height = 812, imagePolicy = () => 'ok') {
   await ctx.route(/^https?:\/\/(?!localhost)/, (route) => route.abort());
   // ジャケット画像の配信元（キングレコード / 水瀬いのり公式）→ ダミー画像
   // CORSヘッダーなし＝本番と同じ opaque 応答になる
-  await ctx.route(/^https:\/\/(www\.kingrecords\.co\.jp\/img\/goods|www\.inoriminase\.com\/img\/disco)\//, (route) => {
+  // ※ リニューアル前の公式サイトの画像（www.inoriminase.com/img/disco/）は、実際と同じく 404 を返す（v1.1.1 からの更新テスト用）
+  await ctx.route(/^https:\/\/www\.inoriminase\.com\/img\/disco\//, (route) => {
+    if (networkDown) return route.abort('internetdisconnected');
+    return route.fulfill({ status: 404, contentType: 'text/html', body: '<html><body>404 Not Found</body></html>' });
+  });
+  await ctx.route(/^https:\/\/(www\.kingrecords\.co\.jp\/img\/goods|inoriminase\.com\/wp\/wp-content\/uploads)\//, (route) => {
     if (networkDown) return route.abort('internetdisconnected');
     imageRequests++;
     const policy = imagePolicy(route.request().url());
@@ -185,10 +192,10 @@ let expectedA;
 let backupZipPath;
 let settingsAtBackup;
 
-await step('全作品一覧（36形態）がグリッド2列で表示される', async () => {
+await step('全作品一覧（39形態）がグリッド2列で表示される', async () => {
   await pageA.goto(BASE);
   await pageA.locator('[data-testid=release]').first().waitFor();
-  eq(await releaseCount(pageA), 36, '件数');
+  eq(await releaseCount(pageA), TOTAL, '件数');
   assert((await pageA.getByTestId('grid').count()) === 1, 'グリッド表示ではない');
   const boxes = await Promise.all([0, 1, 2].map((i) => pageA.locator('[data-testid=release]').nth(i).boundingBox()));
   assert(Math.abs(boxes[0].y - boxes[1].y) < 1 && boxes[1].x > boxes[0].x, '1行目が2列になっていない');
@@ -207,12 +214,12 @@ await step('ジャケット画像が表示される（全形態）', async () =>
     const imgs = [...document.querySelectorAll('[data-testid=release] img')];
     return { n: imgs.length, ok: imgs.filter((i) => i.naturalWidth > 0).length };
   });
-  eq(r, { n: 36, ok: 36 }, '画像');
+  eq(r, { n: TOTAL, ok: TOTAL }, '画像');
   await pageA.evaluate(() => window.scrollTo(0, 0));
 });
 
 await step('初期状態：全て未所持・集計0・コンプリート率0%', async () => {
-  eq(await pageA.getByTestId('badge').filter({ hasText: '未所持' }).count(), 36, '未所持バッジ数');
+  eq(await pageA.getByTestId('badge').filter({ hasText: '未所持' }).count(), TOTAL, '未所持バッジ数');
   eq(await stats(pageA), { owned: 0, total: 0, unopened: 0, opened: 0, completion: '0%' }, '集計');
 });
 
@@ -225,13 +232,13 @@ await step('未開封・開封済を一覧から直接＋−でき、バッジ�
   await plus(pageA, 'KICM-1641', 'unopened');
   eq(await counts(pageA, 'KICM-1641'), { unopened: 1, opened: 0 }, '＋未開封');
   eq((await card(pageA, 'KICM-1641').getByTestId('badge').textContent()).trim(), '所持 1枚', 'バッジ');
-  eq(await stats(pageA), { owned: 1, total: 1, unopened: 1, opened: 0, completion: '2.7%' }, '集計');
+  eq(await stats(pageA), { owned: 1, total: 1, unopened: 1, opened: 0, completion: '2.5%' }, '集計');
   await plus(pageA, 'KICM-1641', 'opened');
   await plus(pageA, 'KICM-1641', 'opened');
   eq((await card(pageA, 'KICM-1641').getByTestId('badge').textContent()).trim(), '所持 3枚', 'バッジ3枚');
   await minus(pageA, 'KICM-1641', 'opened');
   eq(await counts(pageA, 'KICM-1641'), { unopened: 1, opened: 1 }, '−開封済');
-  eq(await stats(pageA), { owned: 1, total: 2, unopened: 1, opened: 1, completion: '2.7%' }, '集計2');
+  eq(await stats(pageA), { owned: 1, total: 2, unopened: 1, opened: 1, completion: '2.5%' }, '集計2');
   await shot(pageA, '02-after-count');
 });
 
@@ -250,7 +257,7 @@ await step('「元に戻す」で直前の変更前に戻る（連続して戻�
   eq(await counts(pageA, 'KICM-1641'), { unopened: 2, opened: 1 }, '1回目');
   await pageA.getByRole('button', { name: '元に戻す' }).click();
   eq(await counts(pageA, 'KICM-1641'), { unopened: 1, opened: 1 }, '2回目');
-  eq(await stats(pageA), { owned: 1, total: 2, unopened: 1, opened: 1, completion: '2.7%' }, '集計も戻る');
+  eq(await stats(pageA), { owned: 1, total: 2, unopened: 1, opened: 1, completion: '2.5%' }, '集計も戻る');
   // 「元に戻す」も保存されている
   const saved = await pageA.evaluate(() => JSON.parse(localStorage.getItem('inori-collection/collection')).items['KICM-1641']);
   eq(saved, { unopened: 1, opened: 1 }, '保存値');
@@ -271,7 +278,7 @@ await step('再読み込み後も枚数が残る', async () => {
   await pageA.reload();
   await pageA.locator('[data-testid=release]').first().waitFor();
   for (const [id, v] of Object.entries(expectedA)) eq(await counts(pageA, id), v, id);
-  eq(await stats(pageA), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '11.1%' }, '集計');
+  eq(await stats(pageA), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '10.2%' }, '集計');
 });
 
 await step('アプリを閉じて開き直しても枚数が残る（タブを閉じて新しいタブで開く）', async () => {
@@ -287,7 +294,7 @@ const pA = () => A.page;
 await step('リスト表示に切り替えられ、＋−も使える', async () => {
   await pA().getByRole('radio', { name: 'リスト表示' }).click();
   await pA().getByTestId('list').waitFor();
-  eq(await releaseCount(pA()), 36, '件数');
+  eq(await releaseCount(pA()), TOTAL, '件数');
   const jacket = await card(pA(), 'KICM-1641').locator('img').boundingBox();
   const title = await card(pA(), 'KICM-1641').locator('h3').boundingBox();
   assert(jacket.x < title.x, 'ジャケットが左側にない');
@@ -302,11 +309,13 @@ await step('カテゴリー絞り込み', async () => {
   await pA().getByRole('radio', { name: 'アルバム' }).click();
   eq(await releaseCount(pA()), 14, 'アルバム');
   await pA().getByRole('radio', { name: 'シングル' }).click();
-  eq(await releaseCount(pA()), 13, 'シングル');
+  eq(await releaseCount(pA()), 14, 'シングル');
   await pA().getByRole('radio', { name: 'ライブBlu-ray' }).click();
   eq(await releaseCount(pA()), 9, 'Blu-ray');
+  await pA().getByRole('radio', { name: 'MUSIC CLIP BOX' }).click();
+  eq(await releaseCount(pA()), 2, 'MUSIC CLIP BOX');
   await pA().getByRole('radio', { name: 'すべて' }).first().click();
-  eq(await releaseCount(pA()), 36, 'すべて');
+  eq(await releaseCount(pA()), TOTAL, 'すべて');
 });
 
 await step('所持状況・開封状態の絞り込みと複合フィルター', async () => {
@@ -314,7 +323,7 @@ await step('所持状況・開封状態の絞り込みと複合フィルター',
   await pA().getByRole('radio', { name: '所持している作品' }).click();
   eq(await releaseCount(pA()), 4, '所持');
   await pA().getByRole('radio', { name: '未所持の作品' }).click();
-  eq(await releaseCount(pA()), 32, '未所持');
+  eq(await releaseCount(pA()), TOTAL - 4, '未所持');
   await pA().getByRole('radio', { name: '所持している作品' }).click();
   await pA().getByRole('radio', { name: '未開封が1枚以上' }).click();
   eq(await releaseCount(pA()), 3, '未開封あり');
@@ -333,25 +342,25 @@ await step('作品名検索（フィルターとの組み合わせ・0件メッ�
   assert((await pA().getByTestId('empty').textContent()).includes('条件に一致する作品はありません'), '0件メッセージ');
   await shot(pA(), '04-empty');
   await pA().getByTestId('empty').getByRole('button', { name: '条件をリセット' }).click();
-  eq(await releaseCount(pA()), 36, 'リセット');
+  eq(await releaseCount(pA()), TOTAL, 'リセット');
   await pA().getByPlaceholder('作品名で検索').fill('あいまいもこ');
   eq(await pA().locator('[data-testid=release]').first().getAttribute('data-id'), 'KICM-1783', 'ひらがなで検索');
   await pA().getByRole('button', { name: '検索キーワードを消す' }).click();
-  eq(await releaseCount(pA()), 36, 'クリア');
+  eq(await releaseCount(pA()), TOTAL, 'クリア');
 });
 
 await step('並び替え（新しい順・作品名順・カテゴリー順・古い順）', async () => {
   await openFilterPanel(pA());
   const first = async () => pA().locator('[data-testid=release]').first().getAttribute('data-id');
   await pA().getByRole('radio', { name: '発売日が新しい順' }).click();
-  eq(await first(), 'KICM-2174', '新しい順の先頭');
+  eq(await first(), 'KICM-2183', '新しい順の先頭（発売予定の14th Single）');
   await pA().getByRole('radio', { name: '作品名順' }).click();
   const titles = await pA().locator('[data-testid=release] h3').allTextContents();
   const sorted = [...titles].sort(new Intl.Collator('ja', { numeric: true, sensitivity: 'base' }).compare);
   eq(titles, sorted, '作品名順');
   await pA().getByRole('radio', { name: 'カテゴリー順' }).click();
   const ids = await pA().locator('[data-testid=release]').evaluateAll((els) => els.map((e) => e.dataset.id));
-  eq([ids[0], ids[12], ids[13], ids[27]], ['KICM-1641', 'KICM-2174', 'KICS-93477', 'KIXM-315'], 'カテゴリー順の境目');
+  eq([ids[0], ids[13], ids[14], ids[28], ids[37]], ['KICM-1641', 'KICM-2183', 'KICS-93477', 'KIXM-315', 'KIXM-379'], 'カテゴリー順の境目');
   await pA().getByRole('radio', { name: '発売日が古い順' }).click();
   eq(await first(), 'KICM-1641', '古い順の先頭');
 });
@@ -389,7 +398,8 @@ await step('バックアップを作成：ZIPがダウンロードされ、正�
   eq(Object.keys(zip.files), ['inori-collection-backup.json'], 'ZIPの中身');
   const json = JSON.parse(await zip.file('inori-collection-backup.json').async('string'));
   eq(json.format, 'inori-collection-backup', 'format');
-  eq(json.schemaVersion, 1, 'version');
+  eq(json.schemaVersion, 2, 'version');
+  eq(json.jackets, {}, '画像なし（自分で設定した画像がない）');
   assert(!Number.isNaN(Date.parse(json.createdAt)), '作成日時');
   eq(json.collection, Object.fromEntries(Object.keys(expectedA).sort().map((k) => [k, expectedA[k]])), '所持データ');
   eq(json.settings, settingsAtBackup, '表示設定');
@@ -428,12 +438,12 @@ await step('新しい端末（初期状態）でZIPを選ぶと、確認ダイ�
 await step('復元後の所持枚数・集計・表示設定が元の端末と一致する', async () => {
   await openFilterPanel(pageB);
   await pageB.getByRole('button', { name: '検索・絞り込み条件をリセット' }).click();
-  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '11.1%' }, '集計');
+  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '10.2%' }, '集計');
   for (const [id, v] of Object.entries(expectedA)) eq(await counts(pageB, id), v, id);
   await pageB.reload();
   await pageB.getByTestId('list').waitFor();
   eq(await pageB.getByRole('radio', { name: 'リスト表示' }).getAttribute('aria-checked'), 'true', '表示形式');
-  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '11.1%' }, '再読み込み後');
+  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '10.2%' }, '再読み込み後');
 });
 
 await step('復元直後は「元に戻す」で復元前に戻せる', async () => {
@@ -441,7 +451,7 @@ await step('復元直後は「元に戻す」で復元前に戻せる', async ()
   await restoreInput(pageB).setInputFiles(resolve(ROOT, 'tests/fixtures/backup-v1-sample.zip'));
   await pageB.getByTestId('confirm-restore').click();
   await pageB.getByRole('button', { name: '元に戻す' }).click();
-  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '11.1%' }, '戻った');
+  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '10.2%' }, '戻った');
 });
 
 const before = async () => pageB.evaluate(() => localStorage.getItem('inori-collection/collection'));
@@ -529,7 +539,7 @@ await step('保存データが壊れていても起動でき、通知され、�
   await pageB.getByTestId('list').waitFor();
   await openFilterPanel(pageB);
   await pageB.getByRole('button', { name: '検索・絞り込み条件をリセット' }).click();
-  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '11.1%' }, 'バックアップで復旧');
+  eq(await stats(pageB), { owned: 4, total: 7, unopened: 3, opened: 4, completion: '10.2%' }, 'バックアップで復旧');
 });
 
 await step('v1.0.0 時点でマスター未登録だった KICS-93477 は、追加された初回限定盤に紐づいて表示される', async () => {
@@ -563,7 +573,7 @@ await step('本当にマスターにないIDを含むバックアップも、そ
 // ═════════ 旧バージョン（v1.0.0・34形態）のZIPを新しい端末で復元 ═════════
 const V1_EXPECTED = JSON.parse(readFileSync(resolve(ROOT, 'tests/fixtures/backup-v1.0.0-34forms.expected.json'), 'utf-8'));
 
-await step('v1.0.0（34形態）で作成したZIPを、新しい端末の v1.1.0（36形態）で復元できる', async () => {
+await step('v1.0.0（34形態）で作成したZIPを、新しい端末の v1.2.0（39形態）で復元できる', async () => {
   const C = await newDevice();
   await C.page.goto(BASE);
   await C.page.locator('[data-testid=release]').first().waitFor();
@@ -582,7 +592,7 @@ await step('v1.0.0（34形態）で作成したZIPを、新しい端末の v1.1.
   eq((await card(C.page, 'KICS-93785').getByTestId('badge').textContent()).trim(), '未所持', 'KICS-93785 バッジ');
   const all = Object.values(V1_EXPECTED.collection);
   const sum = (k) => all.reduce((n, h) => n + h[k], 0);
-  eq(await stats(C.page), { owned: 35, total: sum('unopened') + sum('opened'), unopened: sum('unopened'), opened: sum('opened'), completion: '97.2%' }, '集計');
+  eq(await stats(C.page), { owned: 35, total: sum('unopened') + sum('opened'), unopened: sum('unopened'), opened: sum('opened'), completion: '89.7%' }, '集計');
   await shot(C.page, '13-restored-from-v1');
   await C.ctx.close();
 });
@@ -621,7 +631,7 @@ await step('Service Worker が有効になり、オフライン準備完了が�
   await pA().locator('[data-testid=offline-pill][data-state=ready]').waitFor({ timeout: 40000 });
   eq((await pA().getByTestId('offline-pill').textContent()).trim(), 'オフラインOK', 'ヘッダー表示');
   const cached = await pA().evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length);
-  eq(cached, 36, 'ジャケットのキャッシュ数');
+  eq(cached, TOTAL, 'ジャケットのキャッシュ数');
   await shot(pA(), '10-offline-ready');
 });
 
@@ -635,7 +645,7 @@ await step('オフラインで起動・一覧表示・ジャケット表示が�
   await openFilterPanel(pA());
   await pA().getByRole('button', { name: '検索・絞り込み条件をリセット' }).click();
   await pA().getByRole('radio', { name: 'グリッド表示' }).click();
-  eq(await releaseCount(pA()), 36, 'オフライン一覧');
+  eq(await releaseCount(pA()), TOTAL, 'オフライン一覧');
   for (let i = 0; i < 8; i++) {
     await pA().mouse.wheel(0, 2000);
     await pA().waitForTimeout(150);
@@ -645,7 +655,7 @@ await step('オフラインで起動・一覧表示・ジャケット表示が�
     const imgs = [...document.querySelectorAll('[data-testid=release] img')];
     return { n: imgs.length, ok: imgs.filter((i) => i.naturalWidth > 0).length };
   });
-  eq(r, { n: 36, ok: 36 }, 'オフラインのジャケット');
+  eq(r, { n: TOTAL, ok: TOTAL }, 'オフラインのジャケット');
   eq(imageRequests, 0, '外部への画像リクエスト（0であるべき）');
   await pA().evaluate(() => window.scrollTo(0, 0));
   await shot(pA(), '11-offline');
@@ -656,7 +666,7 @@ await step('オフラインで検索・絞り込み・枚数変更・集計が�
   eq(await releaseCount(pA()), 1, 'オフライン検索');
   await plus(pA(), 'KICM-2174', 'unopened');
   eq(await counts(pA(), 'KICM-2174'), { unopened: 1, opened: 0 }, 'オフライン＋');
-  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '13.8%' }, 'オフライン集計');
+  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '12.8%' }, 'オフライン集計');
   await pA().getByRole('button', { name: '検索キーワードを消す' }).click();
   await pA().getByRole('radio', { name: 'ライブBlu-ray' }).click();
   eq(await releaseCount(pA()), 9, 'オフライン絞り込み');
@@ -671,7 +681,7 @@ await step('オンライン復帰後もデータが維持される', async () =>
   await A.ctx.setOffline(false);
   await pA().reload();
   await pA().locator('[data-testid=release]').first().waitFor();
-  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '13.8%' }, '集計');
+  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '12.8%' }, '集計');
 });
 
 await step('アプリ更新後も所持情報・表示設定・画像キャッシュが維持される', async () => {
@@ -683,12 +693,12 @@ await step('アプリ更新後も所持情報・表示設定・画像キャッ�
   await Promise.all([pA().waitForEvent('load', { timeout: 30000 }), pA().getByRole('button', { name: '更新する' }).click()]);
   await pA().locator('[data-testid=release]').first().waitFor();
   await openSettings(pA());
-  await pA().getByText('アプリのバージョン：1.1.1-e2e').waitFor();
+  await pA().getByText('アプリのバージョン：1.2.0-e2e').waitFor();
   await closeTopDialog(pA());
-  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '13.8%' }, '更新後の集計');
+  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '12.8%' }, '更新後の集計');
   eq(await pA().getByRole('radio', { name: 'リスト表示' }).getAttribute('aria-checked'), 'true', '更新後の表示設定');
   const cached = await pA().evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length);
-  eq(cached, 36, '更新後の画像キャッシュ');
+  eq(cached, TOTAL, '更新後の画像キャッシュ');
 });
 
 await step('更新後もオフラインで起動できる', async () => {
@@ -696,7 +706,7 @@ await step('更新後もオフラインで起動できる', async () => {
   await A.ctx.setOffline(true);
   await pA().reload();
   await pA().locator('[data-testid=release]').first().waitFor({ timeout: 15000 });
-  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '13.8%' }, '集計');
+  eq(await stats(pA()), { owned: 5, total: 8, unopened: 4, opened: 4, completion: '12.8%' }, '集計');
   networkDown = false;
   await A.ctx.setOffline(false);
 });
@@ -745,7 +755,7 @@ await step('1つ目の配信元（キングレコード）で取得できない�
   const cached = await F.page.evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).map((r) => r.url));
   assert(cached.some((u) => u.includes('60a4e3bf248cf')), '予備画像がキャッシュされていない');
   assert(!cached.some((u) => u.includes('c966882027bc4237a58b546ab62efde9')), '取得できない画像がキャッシュに残っている');
-  eq(cached.length, 35, 'キャッシュ数（取得できない1形態を除く）');
+  eq(cached.length, TOTAL - 1, 'キャッシュ数（取得できない1形態を除く）');
 });
 
 await step('どの配信元からも取得できない画像は、CDアイコンを表示し、準備状況に「画像なし」と明示する（「オフラインOK」とは表示しない）', async () => {
@@ -780,7 +790,7 @@ await step('画像がすべて取得できないとき（配信元の障害な�
   await G.page.goto(BASE);
   await G.page.locator('[data-testid=release]').first().waitFor();
   await G.page.locator('[data-testid=offline-pill][data-state=partial]').waitFor({ timeout: 40000 });
-  eq((await G.page.getByTestId('offline-pill').textContent()).trim(), '画像なし36件', 'ヘッダー表示');
+  eq((await G.page.getByTestId('offline-pill').textContent()).trim(), `画像なし${TOTAL}件`, 'ヘッダー表示');
   eq(await G.page.locator('[data-testid=jacket-placeholder]').count() > 0, true, 'プレースホルダー表示');
 });
 
@@ -789,10 +799,118 @@ await step('配信元が復旧したら、再試行ボタンで画像を取得�
   await openSettings(G.page);
   await G.page.getByRole('button', { name: '取得できなかった画像を再試行' }).click();
   await G.page.locator('[data-testid=offline-pill][data-state=ready]').waitFor({ timeout: 40000 });
-  eq(await G.page.evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length), 36, 'キャッシュ数');
+  eq(await G.page.evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length), TOTAL, 'キャッシュ数');
   await closeTopDialog(G.page);
   await G.ctx.close();
 });
+
+// ═════════ 自分で設定したジャケット画像（個人用版：公式の画像より優先） ═════════
+const USER_IMG = resolve(ROOT, 'public/icons/icon-512.png');
+const P = await newDevice();
+const detail = (page) => page.locator('dialog[open] [data-testid=detail]');
+async function openDetail(page, id) {
+  await tap(card(page, id).getByTestId('open-detail'));
+  await detail(page).waitFor();
+}
+async function cardImage(page, id) {
+  const c = card(page, id);
+  await c.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await page.waitForFunction(
+    (id) => [...document.querySelectorAll(`[data-testid=release][data-id="${id}"] img`)].every((i) => i.complete),
+    id,
+    { timeout: 10000 },
+  );
+  return c.evaluate((el) => {
+    const img = el.querySelector('img');
+    return { user: img?.hasAttribute('data-user-jacket') ?? false, official: img?.hasAttribute('data-jacket-index') ?? false, width: img?.naturalWidth ?? 0 };
+  });
+}
+
+await step('ジャケットをタップすると作品の詳細（品番・発売日・公式ページへのリンク）が開く', async () => {
+  await P.page.goto(BASE);
+  await P.page.locator('[data-testid=release]').first().waitFor();
+  await openDetail(P.page, 'KICM-2183');
+  const text = await detail(P.page).innerText();
+  for (const t of ['未解決で、ロマンスで。', 'KICM-2183', '2027.01.27', 'シングル', '公式サイトの画像を表示しています。']) assert(text.includes(t), `詳細に「${t}」がない: ${text}`);
+  eq(await detail(P.page).getByRole('link', { name: '公式サイトの作品ページ' }).getAttribute('href'), 'https://inoriminase.com/discography/2445/', '公式ページ');
+  eq(await detail(P.page).getByRole('link', { name: 'キングレコードの商品ページ' }).getAttribute('href'), 'https://www.kingrecords.co.jp/cs/g/gKICM-2183/', 'キングレコード');
+  await shot(P.page, '16-detail-personal');
+});
+
+await step('個人用版でも自分で画像を設定でき、公式の画像より優先して表示される', async () => {
+  await detail(P.page).getByTestId('jacket-input').setInputFiles(USER_IMG);
+  await P.page.getByText('の画像を設定しました').waitFor();
+  eq(((await detail(P.page).getByTestId('jacket-source').textContent()) ?? '').startsWith('自分で設定した画像を表示しています'), true, '詳細の表示');
+  await closeTopDialog(P.page);
+  eq(await cardImage(P.page, 'KICM-2183'), { user: true, official: false, width: 512 }, '一覧で自分の画像を表示');
+  await P.page.reload();
+  await P.page.locator('[data-testid=release]').first().waitFor();
+  eq(await cardImage(P.page, 'KICM-2183'), { user: true, official: false, width: 512 }, '再読み込み後も表示');
+});
+
+await step('設定した画像を削除すると公式の画像に戻り、「元に戻す」で再び表示される', async () => {
+  await openDetail(P.page, 'KICM-2183');
+  await detail(P.page).getByTestId('remove-jacket').click();
+  await P.page.getByText('の画像を削除しました').waitFor();
+  eq(await cardImage(P.page, 'KICM-2183'), { user: false, official: true, width: 192 }, '公式の画像（ダミー）に戻る');
+  await P.page.getByRole('button', { name: '元に戻す' }).click();
+  await P.page.locator(`[data-testid=release][data-id="KICM-2183"] img[data-user-jacket]`).waitFor();
+  eq(await cardImage(P.page, 'KICM-2183'), { user: true, official: false, width: 512 }, '元に戻す');
+  await P.ctx.close();
+});
+
+// ═════════ 前回の版（v1.1.1・36形態）からのアプリ更新 ═════════
+const V111_DIST = process.env.V111_DIST || resolve(ROOT, '../v1.1.1-dist');
+if (!existsSync(resolve(V111_DIST, 'index.html'))) {
+  results.push({ name: 'v1.1.1 からのアプリ更新（v1.1.1 のビルドが見つからないため未実施）', ok: null });
+  console.log('  - v1.1.1 のビルドがないため、前回の版からの更新テストを省略（V111_DIST を指定）');
+} else {
+  const server4 = await startServer(V111_DIST, 4177);
+  const V = await newDevice();
+  let before;
+  let settingsBefore;
+  await step('v1.1.1（36形態）を使っている端末で、データ・表示設定・オフライン準備を用意する（公式サイト改修中で画像なし2件）', async () => {
+    await V.page.goto(server4.url);
+    await V.page.locator('[data-testid=release]').first().waitFor();
+    eq(await releaseCount(V.page), 36, 'v1.1.1 は36形態');
+    await plus(V.page, 'KICS-93477', 'unopened');
+    await plus(V.page, 'KICM-2174', 'opened');
+    await plus(V.page, 'KIXM-648', 'unopened');
+    await V.page.getByRole('radio', { name: 'ライブBlu-ray' }).click();
+    await V.page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 20000 }).catch(async () => {
+      await V.page.reload();
+      await V.page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 20000 });
+    });
+    // v1.1.1 は公式サイトの旧URL（404）を見ているので、初回限定盤2形態が「画像なし」
+    await V.page.locator('[data-testid=offline-pill][data-state=partial]').waitFor({ timeout: 40000 });
+    eq((await V.page.getByTestId('offline-pill').textContent()).trim(), '画像なし2件', 'v1.1.1 のヘッダー表示');
+    await V.page.reload();
+    await V.page.locator('[data-testid=release]').first().waitFor();
+    before = await V.page.evaluate(() => JSON.parse(localStorage.getItem('inori-collection/collection')).items);
+    settingsBefore = await V.page.evaluate(() => JSON.parse(localStorage.getItem('inori-collection/settings')));
+  });
+
+  await step('v1.1.1 → v1.2.0 に更新：所持枚数・表示設定はそのまま、新作3形態が0枚で加わり、初回限定盤2形態の画像も表示される', async () => {
+    server4.setRoot(resolve(ROOT, 'dist'));
+    await V.page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
+    await V.page.getByText('新しいバージョンがあります').waitFor({ timeout: 30000 });
+    await Promise.all([V.page.waitForEvent('load', { timeout: 30000 }), V.page.getByRole('button', { name: '更新する' }).click()]);
+    await V.page.locator('[data-testid=release]').first().waitFor();
+    eq(await V.page.evaluate(() => JSON.parse(localStorage.getItem('inori-collection/collection')).items), before, '所持データは更新前と同じ');
+    eq(await V.page.evaluate(() => JSON.parse(localStorage.getItem('inori-collection/settings'))), settingsBefore, '表示設定は更新前と同じ');
+    eq(await releaseCount(V.page), 9, '表示設定（ライブBlu-ray）のまま');
+    await V.page.getByRole('radio', { name: 'すべて' }).first().click();
+    eq(await releaseCount(V.page), TOTAL, `${TOTAL}形態`);
+    for (const id of ['KICM-2183', 'KIXM-379', 'KIXM-627']) eq(await counts(V.page, id), { unopened: 0, opened: 0 }, `${id} は0枚`);
+    eq(await counts(V.page, 'KICS-93477'), { unopened: 1, opened: 0 }, '既存の枚数');
+    await V.page.locator('[data-testid=offline-pill][data-state=ready]').waitFor({ timeout: 40000 });
+    eq(await imgState(V.page, 'KICS-93477'), { placeholder: false, index: 0, loaded: true }, 'Innocent flower 初回限定盤の画像（リニューアル後の公式サイト）');
+    eq(await V.page.evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length), TOTAL, '画像キャッシュ');
+    await shot(V.page, '17-upgraded-from-v1.1.1');
+  });
+  await V.ctx.close();
+  await server4.close();
+}
 
 // ═════════ 実際の旧バージョン（v1.0.0・34形態）からのアプリ更新 ═════════
 const V1_DIST = process.env.V1_DIST || resolve(ROOT, '../v1-dist');
@@ -828,7 +946,7 @@ if (!existsSync(resolve(V1_DIST, 'index.html'))) {
     eq(before['KICS-93477'], { unopened: 1, opened: 0 }, 'v1.0.0 では未登録IDとして保持');
   });
 
-  await step('v1.0.0 → v1.1.0 に更新：既存の所持枚数・表示設定・画像キャッシュが維持され、追加2形態が表示される', async () => {
+  await step('v1.0.0 → 最新版に更新：既存の所持枚数・表示設定・画像キャッシュが維持され、追加した形態が表示される', async () => {
     server2.setRoot(resolve(ROOT, 'dist'));
     await U.page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
     await U.page.getByText('新しいバージョンがあります').waitFor({ timeout: 30000 });
@@ -836,11 +954,11 @@ if (!existsSync(resolve(V1_DIST, 'index.html'))) {
     await U.page.locator('[data-testid=release]').first().waitFor();
     await openSettings(U.page);
     await U.page.getByText(`アプリのバージョン：${APP_VERSION}`).waitFor();
-    await U.page.getByText('登録形態数：36').waitFor();
+    await U.page.getByText(`登録形態数：${TOTAL}`).waitFor();
     await closeTopDialog(U.page);
     const after = await U.page.evaluate(() => JSON.parse(localStorage.getItem('inori-collection/collection')).items);
     eq(after, before, '保存データは更新前と完全に同じ');
-    eq(await releaseCount(U.page), 36, '36形態を表示');
+    eq(await releaseCount(U.page), TOTAL, `${TOTAL}形態を表示`);
     eq(await U.page.getByRole('radio', { name: 'リスト表示' }).getAttribute('aria-checked'), 'true', '表示設定');
     eq(await counts(U.page, 'KICM-1641'), { unopened: 2, opened: 2 }, '既存の枚数');
     eq(await counts(U.page, 'KICS-93477'), { unopened: 1, opened: 0 }, '以前は未登録だった KICS-93477 が紐づく');
@@ -849,31 +967,31 @@ if (!existsSync(resolve(V1_DIST, 'index.html'))) {
     eq([s.owned, s.total], [Object.keys(before).length, Object.values(before).reduce((n, h) => n + h.unopened + h.opened, 0)], '集計（KICS-93477も含む）');
     // 追加形態の画像も取得され、オフライン準備完了になる
     await U.page.locator('[data-testid=offline-pill][data-state=ready]').waitFor({ timeout: 40000 });
-    eq(await U.page.evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length), 36, '画像キャッシュ');
+    eq(await U.page.evaluate(async () => (await (await caches.open('inori-jackets-v1')).keys()).length), TOTAL, '画像キャッシュ');
     await shot(U.page, '15-upgraded-from-v1');
   });
 
-  await step('v1.1.0 への更新後、オフラインで起動して36形態とジャケットを表示できる', async () => {
+  await step('最新版への更新後、オフラインで起動して全形態とジャケットを表示できる', async () => {
     networkDown = true;
     await U.ctx.setOffline(true);
     imageRequests = 0;
     await U.page.reload();
     await U.page.locator('[data-testid=release]').first().waitFor({ timeout: 15000 });
-    eq(await releaseCount(U.page), 36, '件数');
+    eq(await releaseCount(U.page), TOTAL, '件数');
     await scrollAll(U.page);
     await U.page.waitForFunction(() => [...document.querySelectorAll('[data-testid=release] img')].every((i) => i.complete), null, { timeout: 15000 });
     const r = await U.page.evaluate(() => {
       const imgs = [...document.querySelectorAll('[data-testid=release] img')];
       return { n: imgs.length, ok: imgs.filter((i) => i.naturalWidth > 0).length };
     });
-    eq(r, { n: 36, ok: 36 }, 'オフラインのジャケット');
+    eq(r, { n: TOTAL, ok: TOTAL }, 'オフラインのジャケット');
     eq(imageRequests, 0, '外部への画像リクエスト');
     networkDown = false;
     await U.ctx.setOffline(false);
   });
   await U.ctx.close();
 
-  await step('（v1.0.0 の既知の不具合）初回インストール直後の画面で更新した場合は自動で切り替わらないが、開き直せば v1.1.0 になりデータも維持される', async () => {
+  await step('（v1.0.0 の既知の不具合）初回インストール直後の画面で更新した場合は自動で切り替わらないが、開き直せば最新版になりデータも維持される', async () => {
     server2.setRoot(V1_DIST);
     const U2 = await newDevice();
     await U2.page.goto(server2.url);
@@ -888,7 +1006,7 @@ if (!existsSync(resolve(V1_DIST, 'index.html'))) {
     eq(await releaseCount(U2.page), 34, 'v1.0.0 の画面のまま（旧版の不具合）');
     await U2.page.reload();
     await U2.page.locator('[data-testid=release]').first().waitFor();
-    eq(await releaseCount(U2.page), 36, '開き直すと v1.1.0');
+    eq(await releaseCount(U2.page), TOTAL, '開き直すと最新版');
     eq(await counts(U2.page, 'KICM-2174'), { unopened: 1, opened: 0 }, 'データ維持');
     await U2.ctx.close();
   });
@@ -908,7 +1026,7 @@ await step('（v1.1.0 で修正）初回インストール直後の画面でも�
   await Promise.all([W.page.waitForEvent('load', { timeout: 15000 }), W.page.getByRole('button', { name: '更新する' }).click()]);
   await W.page.locator('[data-testid=release]').first().waitFor();
   await openSettings(W.page);
-  await W.page.getByText('アプリのバージョン：1.1.1-e2e').waitFor();
+  await W.page.getByText('アプリのバージョン：1.2.0-e2e').waitFor();
   await closeTopDialog(W.page);
   eq(await counts(W.page, 'KICM-2174'), { unopened: 0, opened: 1 }, 'データ維持');
   await W.ctx.close();

@@ -1,5 +1,11 @@
-/** 作品カテゴリー */
-export type Category = 'single' | 'album' | 'bluray';
+/**
+ * 作品カテゴリー
+ * - single : シングル（CD）
+ * - album  : アルバム（CD）
+ * - bluray : ライブBlu-ray
+ * - clips  : MUSIC CLIP BOX（ミュージッククリップ集の Blu-ray）
+ */
+export type Category = 'single' | 'album' | 'bluray' | 'clips';
 
 /**
  * 作品マスターの1レコード = 1形態（初回限定盤・通常盤などは別レコード）。
@@ -25,7 +31,9 @@ export interface Release {
   catalogNumber: string | null;
   /**
    * ジャケット画像URLの候補（先頭から順に試し、表示できたものを使う）。
-   * 画像ファイルはアプリに同梱せず、公式の配信元を参照する。空なら常にプレースホルダー表示。
+   * 画像ファイルはアプリに同梱せず、公式の配信元を参照する（src/data/jackets.ts）。
+   * 公開版（INORI_EDITION=public）では常に空で、配信元から画像を取得しない。
+   * 空ならユーザーが設定した画像、またはプレースホルダーを表示する。
    */
   jacketUrls: string[];
   /** 水瀬いのり公式サイトの作品詳細ページURL。確認できない場合は null */
